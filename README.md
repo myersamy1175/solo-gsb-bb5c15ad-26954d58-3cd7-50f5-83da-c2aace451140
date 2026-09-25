@@ -52,6 +52,14 @@
 **与单级恒定偏差假设不符**；只要区间仍含正常倍率 1 就保留不确定性，
 **不凭单次首末轴读数指认具体级位**。
 
+再支持**装配校准（相位回零）**：录入已装好的 **1～3 级**外啮合传动各级**主动 / 从动齿数**，
+以及**输入轴与各级输出轴的初始标记相位**（0 ≤ p/q < 1，分数或小数均可）。
+以输入轴再转**严格正整数圈**为候选：外啮合每级反向，各轴有向转数按齿数连乘（精确分数），
+每个轴的“标记回零”条件化为模同余 **N ≡ r (mod m)**（模恰为该轴每圈转数分母）；
+多轴同余按**广义中国剩余定理**合并——非互素模以 gcd 判定兼容、以 lcm 合并，
+两两不兼容即整体无解。返回**最早圈数**、该圈数下**各轴有向转数**与相位校核；
+无法同时回零时明确给出**冲突轴**（“任何整数圈都无法回零”的轴与互斥轴对）。
+
 ## 一键启动（Docker Compose，自动安装依赖并构建）
 
 ```bash
@@ -69,6 +77,7 @@ docker compose up --build
 | 带载安全选配（扭矩校核） | **http://localhost:3000/torque**（或 `/torque.html`） |
 | 轴位装配（定轴距 / 模数逐轴安装） | **http://localhost:3000/layout**（或 `/layout.html`） |
 | 转速异常定位（转数观测 / 倍率定位） | **http://localhost:3000/diagnose**（或 `/diagnose.html`） |
+| 装配校准（相位回零 / 模同余合并） | **http://localhost:3000/phase-reset**（或 `/phase-reset.html`） |
 
 后台运行可用 `docker compose up --build -d`，停止用 `docker compose down`。
 
@@ -84,7 +93,7 @@ npm start
 访问 http://localhost:3000 ，批量装配页 http://localhost:3000/batch ，
 缺齿补货页 http://localhost:3000/procure ，双档换速页 http://localhost:3000/dual-speed ，
 带载安全选配页 http://localhost:3000/torque ，轴位装配页 http://localhost:3000/layout ，
-转速异常定位页 http://localhost:3000/diagnose 。
+转速异常定位页 http://localhost:3000/diagnose ，装配校准页 http://localhost:3000/phase-reset 。
 
 ## 必要配置（环境变量）
 
@@ -93,11 +102,11 @@ npm start
 | `PORT` | 容器内服务监听端口（一般无需修改） | `3000` |
 | `APP_PORT` | Compose 映射到宿主机的端口，按需覆盖，例如 `APP_PORT=8080 docker compose up --build` | `3000` |
 
-两个变量控制同一服务端口，七个页面共用；例如改用宿主机 8080 端口后，访问
+两个变量控制同一服务端口，八个页面共用；例如改用宿主机 8080 端口后，访问
 http://localhost:8080 （单台）、http://localhost:8080/batch （批量）、
 http://localhost:8080/procure （缺齿补货）、http://localhost:8080/dual-speed （双档换速）、
-http://localhost:8080/torque （带载安全）、http://localhost:8080/layout （轴位装配）
-与 http://localhost:8080/diagnose （转速异常定位）：
+http://localhost:8080/torque （带载安全）、http://localhost:8080/layout （轴位装配）、
+http://localhost:8080/diagnose （转速异常定位）与 http://localhost:8080/phase-reset （装配校准）：
 
 ```bash
 APP_PORT=8080 docker compose up --build
@@ -303,6 +312,28 @@ APP_PORT=8080 docker compose up --build
   `ambiguous`；用含中间轴的观测（哪怕只补一个中间轴）即可逐级排除 / 确认。
 - “恒定”是跨观测约束：同一级在不同观测中要求的 m 区间交集为空时，
   该级即被排除；所有级都被排除时给出 `inconsistent`。
+
+## 使用说明 — 装配校准（相位回零）
+
+1. 在顶部导航进入 **装配校准**（`/phase-reset`）。
+2. 按 **输入轴 → 输出轴** 的顺序录入已装好的 **1～3 级**齿轮：每级填写
+   **主动齿数 / 从动齿数**（正整数）。外啮合每级反向，各轴每输入 1 圈的
+   有向转数按齿数连乘（精确分数，负号表示与输入轴反向）。
+3. 填写 **输入轴与各级输出轴的初始标记相位**（共 级数+1 项）：每项为
+   0 ≤ p/q < 1，可写分数（如 `1/3`）或小数（如 `0.5`），零位填 `0`。
+   输入轴只转整数圈，故其相位必须为 0 才可能回零。
+4. 点击“开始校准计算”，系统把每个轴的“标记回零”条件 N·s + φ ∈ ℤ
+   化为模同余 **N ≡ r (mod m)**（m 恰为该轴每圈有向转数的分母 b；
+   仅当相位分母 q 整除 b 时该轴才有解），再按**广义中国剩余定理**逐轴合并：
+   非互素模以 gcd 判定兼容（余数差须被 gcd 整除）、以 lcm 合并。
+5. 结果区展示完整计算过程与结论：
+   - **逐轴同余表**：各轴相位、每输入圈有向转数（分数 + 小数）与回零同余；
+   - **合并过程**：每一步的起始 / 并入同余、模的 gcd、兼容性判定与合并结果；
+   - **有解时**：合并同余 N ≡ R (mod M)、**最早圈数**（严格正整数解；
+     R = 0 时取周期 M）以及该圈数下**各轴有向转数**与相位校核（φ + N·s 为整数）；
+   - **无解时**：**冲突轴**清单——“任何整数圈都无法回零”的轴
+     （相位分母不整除转数分母）与**互斥轴对**（余数在模 gcd 下不同），
+     并给出各自的同余与 gcd 明细。
 
 ## HTTP 接口
 
@@ -572,6 +603,44 @@ APP_PORT=8080 docker compose up --build
   - `abnormalSegments[]`：全部偏离理论值的轴段清单；
   - `message`：面向页面的中文结论说明。
 
+### `POST /api/phase-reset`（装配校准）
+
+```json
+{
+  "stages": [
+    { "driveTeeth": 20, "drivenTeeth": 40 },
+    { "driveTeeth": 24, "drivenTeeth": 36 },
+    { "driveTeeth": 18, "drivenTeeth": 54 }
+  ],
+  "phases": ["0", "1/2", "1/3", "8/9"]
+}
+```
+
+上例返回 `solvable: true`、`earliestTurns: "17"`（合并同余 N ≡ 17 (mod 18)：
+轴 2 转 −17/2 圈、轴 3 转 17/3 圈、轴 4 转 −17/9 圈，各轴 φ + N·s 均为整数）。
+
+- `stages` 必须为 **1～3** 级；每级 `driveTeeth` / `drivenTeeth` 为
+  **1～100000 的正整数**。
+- `phases` 必须恰好 **级数+1** 项（输入轴 + 各级输出轴）；每项为该轴初始标记相位，
+  **0 ≤ p/q < 1**：可写分数字符串（如 `"1/3"`）或小数（如 `0.5`、`0`），
+  约分后分母 ≤ 10¹²；格式或范围非法返回 **400** 与明确错误。
+- 返回：
+  - `stages[]`：各级齿数与 `stageRatio`（分数 + 小数）；
+  - `axes[]`：逐轴给出 `role`、初始相位 `phase`、每输入 1 圈的有向转数
+    `ratioPerInputTurn`（分数 + 小数，负号表示与输入轴反向）、`solvable`
+    与回零同余 `congruence`（`N ≡ residue (mod modulus)`；不可解时为 `null`
+    并附 `unsolvableReason`）；
+  - `mergeSteps[]`：逐轴合并过程（起始 / 并入同余、模的 `gcd`、余数差 `diff`、
+    兼容性 `compatible`、合并结果与说明 `note`）；
+  - 有解（`solvable: true`、`reason: "ok"`）：`residue` / `period` 为合并同余
+    N ≡ residue (mod period)，**`earliestTurns`** 为最早圈数（严格正整数解，
+    余数为 0 时取周期本身），`axes[].revolutions` 为该圈数下各轴有向转数，
+    `axes[].phaseAfter` 为相位校核（φ + N·s，必为整数）；
+  - 无解（`solvable: false`）：`reason` 为 `axis`（存在任何整数圈都无法回零的轴）、
+    `conflict`（同余互斥）或 `mixed`（两者兼有）；`unsolvableAxes` /
+    `conflictPairs`（含各自同余与 gcd）/ `conflictAxes` 给出全部冲突轴。
+- 全部计算使用 BigInt 精确分数与模运算；圈数、余数、模以字符串返回，无精度损失。
+
 ## 计算与排序规则
 
 - 每级转速比 = 主动轮齿数 / 从动轮齿数；总速比 = 各级速比之积（全程约分分数）。
@@ -620,22 +689,37 @@ APP_PORT=8080 docker compose up --build
   （仅首末轴读数时各级区间完全相同，绝不强行指认）；无级可行 →
   `inconsistent`（与单级恒定偏差假设不符）。
 
+### 装配校准的同余化与合并
+
+- 轴 1 为输入轴：每输入 1 圈各轴有向转数 s₁ = 1，sₖ₊₁ = −sₖ·主动齿/从动齿
+  （外啮合逐级反向，BigInt 分数连乘并约分）；
+- 轴 i 标记回零 ⟺ N·sᵢ + φᵢ ∈ ℤ。写 sᵢ = σ·a/b、φᵢ = p/q（均约分），
+  化为线性同余 σ·a·q·N ≡ −p·b (mod b·q)；gcd(σ·a·q, b·q) = q，
+  故**单轴可解 ⟺ q | b**，可解时约去 q 得 **N ≡ r (mod b)**，
+  r = −σ·p·(b/q)·a⁻¹ mod b（模恰为该轴每圈转数分母 b，与相位分母 q 无关）；
+- 多轴合并走**广义中国剩余定理**：两同余兼容 ⟺ 余数差被模的 gcd 整除，
+  兼容时合并为模 lcm 的同余；同余组有解 ⟺ 任意两两兼容，
+  故无解时必能指出具体的互斥轴对；
+- 合并结果 N ≡ R (mod M)（0 ≤ R < M）给出全部整数解；候选为**严格正整数**圈，
+  最早圈数 = R（R > 0）或 M（R = 0，即 0 圈本已回零，取周期为最小正解）。
+
 ## 目录结构
 
 ```
 .
 ├── Dockerfile              # 多平台 Node 20 Alpine 镜像，构建时安装依赖
-├── docker-compose.yml      # 一键启动服务（七个页面同端口）
+├── docker-compose.yml      # 一键启动服务（八个页面同端口）
 ├── package.json
 ├── src
-│   ├── server.js           # Express 服务：静态页面 + /api/search + /api/batch + /api/procure + /api/dual-speed + /api/torque + /api/layout + /api/diagnose
+│   ├── server.js           # Express 服务：静态页面 + /api/search + /api/batch + /api/procure + /api/dual-speed + /api/torque + /api/layout + /api/diagnose + /api/phase-reset
 │   ├── search.js           # 精确分数搜索算法（BigInt）：完整枚举与单台搜索
 │   ├── batch.js            # 批量装配：按集合留优 + 互不冲突组合的分支限界搜索
 │   ├── procure.js          # 缺齿补货：枚举可购子集，复用批量装配的候选分配与规则
 │   ├── dual.js             # 双档换速：共用固定第一级 + 按档换装第二级的完整枚举与择优
 │   ├── torque.js           # 带载安全：速比配对组 × 全部级次顺序的无损传动扭矩校核
 │   ├── layout.js           # 轴位装配：按轴距/模数穷举有向配对并跨级组合，精确分数校核总速比
-│   └── diagnose.js         # 转速异常定位：读数误差区间→实测速比区间，逐级求跨观测恒定倍率区间并交叉核对
+│   ├── diagnose.js         # 转速异常定位：读数误差区间→实测速比区间，逐级求跨观测恒定倍率区间并交叉核对
+│   └── phase.js            # 装配校准：相位回零化为模同余，广义 CRT 合并与冲突轴定位
 └── public
     ├── index.html          # 单台选配页面
     ├── batch.html          # 批量装配页面（/batch）
@@ -644,6 +728,7 @@ APP_PORT=8080 docker compose up --build
     ├── torque.html         # 带载安全选配页面（/torque）
     ├── layout.html         # 轴位装配页面（/layout）
     ├── diagnose.html       # 转速异常定位页面（/diagnose）
+    ├── phase-reset.html    # 装配校准页面（/phase-reset）
     ├── styles.css
     ├── app.js              # 单台页脚本
     ├── batch.js            # 批量页脚本
@@ -651,5 +736,6 @@ APP_PORT=8080 docker compose up --build
     ├── dual-speed.js       # 双档换速页脚本
     ├── torque.js           # 带载安全页脚本
     ├── layout.js           # 轴位装配页脚本
-    └── diagnose.js         # 转速异常定位页脚本
+    ├── diagnose.js         # 转速异常定位页脚本
+    └── phase-reset.js      # 装配校准页脚本
 ```

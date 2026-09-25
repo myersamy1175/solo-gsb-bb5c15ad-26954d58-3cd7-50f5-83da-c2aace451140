@@ -29,6 +29,11 @@ const {
   MAX_MODULE,
 } = require('./layout');
 const { validateDiagnoseInput, diagnose, MAX_OBSERVATIONS } = require('./diagnose');
+const {
+  validatePhaseResetInput,
+  phaseReset,
+  MAX_STAGES: MAX_PHASE_STAGES,
+} = require('./phase');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -64,6 +69,11 @@ app.get('/layout', (_req, res) => {
 /** 友好访问转速异常定位页：/diagnose → /diagnose.html */
 app.get('/diagnose', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'diagnose.html'));
+});
+
+/** 友好访问装配校准页：/phase-reset → /phase-reset.html */
+app.get('/phase-reset', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'phase-reset.html'));
 });
 
 /** BigInt 分数安全转为有限小数（用于前端展示） */
@@ -164,6 +174,42 @@ function serializeLayoutSolution(r) {
       mounts: s.mounts.map(serializeShaftMount),
     })),
     unusedGears: r.unusedGears,
+  };
+}
+
+/** 装配校准：逐轴同余 / 转数序列化（BigInt → 字符串，分数 → num/den/decimal） */
+function serializePhaseAxis(ax) {
+  return {
+    axis: ax.axis,
+    role: ax.axis === 1 ? '输入轴' : `第 ${ax.axis - 1} 级输出轴`,
+    phase: serializeFrac(ax.phase),
+    ratioPerInputTurn: serializeFrac(ax.ratio),
+    solvable: ax.solvable,
+    unsolvableReason: ax.unsolvableReason,
+    congruence: ax.solvable
+      ? { residue: ax.residue.toString(), modulus: ax.modulus.toString() }
+      : null,
+    revolutions: ax.revolutions ? serializeFrac(ax.revolutions) : null,
+    phaseAfter: ax.phaseAfter ? serializeFrac(ax.phaseAfter) : null,
+  };
+}
+
+/** 装配校准：同余合并步骤序列化（BigInt → 字符串） */
+function serializeMergeStep(st) {
+  return {
+    step: st.step,
+    axis: st.axis,
+    action: st.action,
+    residue: st.residue.toString(),
+    modulus: st.modulus.toString(),
+    priorResidue: st.priorResidue != null ? st.priorResidue.toString() : null,
+    priorModulus: st.priorModulus != null ? st.priorModulus.toString() : null,
+    gcd: st.gcd != null ? st.gcd.toString() : null,
+    diff: st.diff != null ? st.diff.toString() : null,
+    compatible: st.compatible ?? null,
+    mergedResidue: st.mergedResidue != null ? st.mergedResidue.toString() : null,
+    mergedModulus: st.mergedModulus != null ? st.mergedModulus.toString() : null,
+    note: st.note,
   };
 }
 
@@ -710,6 +756,62 @@ app.post('/api/diagnose', (req, res) => {
   });
 });
 
+app.post('/api/phase-reset', (req, res) => {
+  const checked = validatePhaseResetInput(req.body);
+  if (!checked.ok) return res.status(400).json({ error: checked.error });
+  const { stages, phases } = checked;
+
+  // 逐轴把“标记回零”化为模同余，再按广义 CRT 合并（非互素模 gcd 判兼容、lcm 合并）
+  const result = phaseReset(stages, phases);
+
+  const base = {
+    stageCount: result.stageCount,
+    axisCount: result.axisCount,
+    maxStages: MAX_PHASE_STAGES,
+    stages: result.stages.map((st, i) => ({
+      stage: st.stage,
+      driveTeeth: st.driveTeeth,
+      drivenTeeth: st.drivenTeeth,
+      stageRatio: serializeFrac(result.stageRatios[i]),
+    })),
+    axes: result.axes.map(serializePhaseAxis),
+    mergeSteps: result.mergeSteps.map(serializeMergeStep),
+    solvable: result.solvable,
+    reason: result.reason,
+    message: result.message,
+  };
+
+  if (!result.solvable) {
+    return res.json({
+      ...base,
+      earliestTurns: null,
+      residue: null,
+      period: null,
+      unsolvableAxes: result.unsolvableAxes,
+      conflictAxes: result.conflictAxes,
+      conflictPairs: result.conflictPairs.map((cp) => ({
+        axisA: cp.axisA,
+        axisB: cp.axisB,
+        residueA: cp.residueA.toString(),
+        modulusA: cp.modulusA.toString(),
+        residueB: cp.residueB.toString(),
+        modulusB: cp.modulusB.toString(),
+        gcd: cp.gcd.toString(),
+      })),
+    });
+  }
+
+  res.json({
+    ...base,
+    earliestTurns: result.earliestTurns.toString(),
+    residue: result.residue.toString(),
+    period: result.period.toString(),
+    unsolvableAxes: [],
+    conflictAxes: [],
+    conflictPairs: [],
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`齿轮组选配服务已启动： http://localhost:${PORT}`);
   console.log(`  单台选配： http://localhost:${PORT}/`);
@@ -719,4 +821,5 @@ app.listen(PORT, () => {
   console.log(`  带载安全： http://localhost:${PORT}/torque`);
   console.log(`  轴位装配： http://localhost:${PORT}/layout`);
   console.log(`  转速异常定位： http://localhost:${PORT}/diagnose`);
+  console.log(`  装配校准： http://localhost:${PORT}/phase-reset`);
 });
