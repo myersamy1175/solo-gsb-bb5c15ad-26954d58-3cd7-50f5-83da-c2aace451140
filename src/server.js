@@ -29,6 +29,7 @@ const {
   MAX_MODULE,
 } = require('./layout');
 const { validateDiagnoseInput, diagnose, MAX_OBSERVATIONS } = require('./diagnose');
+const { validatePhaseResetInput, phaseReset } = require('./phaseReset');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -64,6 +65,11 @@ app.get('/layout', (_req, res) => {
 /** 友好访问转速异常定位页：/diagnose → /diagnose.html */
 app.get('/diagnose', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'diagnose.html'));
+});
+
+/** 友好访问装配校准页：/phase-reset → /phase-reset.html */
+app.get('/phase-reset', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'phase-reset.html'));
 });
 
 /** BigInt 分数安全转为有限小数（用于前端展示） */
@@ -710,6 +716,81 @@ app.post('/api/diagnose', (req, res) => {
   });
 });
 
+app.post('/api/phase-reset', (req, res) => {
+  const checked = validatePhaseResetInput(req.body);
+  if (!checked.ok) return res.status(400).json({ error: checked.error });
+  const { stages, phases } = checked;
+
+  // 各轴有符号转数比（外啮合每级反向、齿数连乘）→ 逐轴模同余 → 广义 CRT 合并
+  const result = phaseReset(stages, phases);
+
+  res.json({
+    stageCount: result.stageCount,
+    axisCount: result.axisCount,
+    stages: result.stages.map((st, i) => ({
+      stage: st.stage,
+      driveTeeth: st.driveTeeth,
+      drivenTeeth: st.drivenTeeth,
+      stageRatio: serializeFrac(result.stageRatios[i]),
+    })),
+    axes: result.axes.map((ax) => ({
+      axis: ax.axis,
+      role: ax.role,
+      phase: {
+        p: ax.phase.p.toString(),
+        q: ax.phase.q.toString(),
+        reduced: serializeFrac(ax.phase.frac),
+      },
+      turnRatio: serializeFrac(ax.turnRatio),
+      selfSolvable: ax.selfSolvable,
+      selfReason: ax.selfReason ?? null,
+      congruence: ax.selfSolvable
+        ? { residue: ax.residue.toString(), modulus: ax.modulus.toString() }
+        : null,
+    })),
+    mergeSteps: result.mergeSteps.map((s) => ({
+      axis: s.axis,
+      axisResidue: s.axisResidue.toString(),
+      axisModulus: s.axisModulus.toString(),
+      accResidue: s.accResidue.toString(),
+      accModulus: s.accModulus.toString(),
+      gcd: s.gcd.toString(),
+      compatible: s.compatible,
+      newResidue: s.newResidue === null ? null : s.newResidue.toString(),
+      newModulus: s.newModulus === null ? null : s.newModulus.toString(),
+    })),
+    feasible: result.feasible,
+    turns: result.turns === null ? null : result.turns.toString(),
+    period: result.period === null ? null : result.period.toString(),
+    shaftTurns:
+      result.shaftTurns === null
+        ? null
+        : result.shaftTurns.map((st) => ({
+            axis: st.axis,
+            role: st.role,
+            turns: serializeFrac(st.turns),
+            direction: st.direction,
+            phasePlusTurns: serializeFrac(st.phasePlusTurns),
+          })),
+    conflicts: result.conflicts.map((c) => ({
+      type: c.type,
+      axes: c.axes,
+      reason: c.reason,
+      ...(c.type === 'pair'
+        ? {
+            residueA: c.residueA.toString(),
+            modulusA: c.modulusA.toString(),
+            residueB: c.residueB.toString(),
+            modulusB: c.modulusB.toString(),
+            gcd: c.gcd.toString(),
+          }
+        : {}),
+    })),
+    conflictAxes: result.conflictAxes,
+    message: result.message,
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`齿轮组选配服务已启动： http://localhost:${PORT}`);
   console.log(`  单台选配： http://localhost:${PORT}/`);
@@ -719,4 +800,5 @@ app.listen(PORT, () => {
   console.log(`  带载安全： http://localhost:${PORT}/torque`);
   console.log(`  轴位装配： http://localhost:${PORT}/layout`);
   console.log(`  转速异常定位： http://localhost:${PORT}/diagnose`);
+  console.log(`  装配校准： http://localhost:${PORT}/phase-reset`);
 });
